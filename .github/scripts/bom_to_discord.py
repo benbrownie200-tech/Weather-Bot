@@ -103,10 +103,10 @@ def format_item(item: dict) -> str:
     title = item["title"] or "BOM warning"
     link = item["link"]
     if link:
-        return f"⚠️ @everyone **{title}**\n{link}"
+        return f"⚠️ \n **{title}**\n{link}"
     else:
         desc = item["description"] or ""
-        return f"⚠️ @everyone **{title}**{desc[:1800]}\n"  # discord 2k char limit
+        return f"⚠️ \n **{title}**{desc[:1800]}\n"  # discord 2k char limit
 
 
 def main() -> None:
