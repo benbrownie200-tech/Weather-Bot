@@ -24,6 +24,7 @@ jobs:
       - name: Install deps
         run: |
           pip install requests beautifulsoup4
+          pip install requests beautifulsoup4 lxml
 
       - name: Run BOM → Discord script
         env:
