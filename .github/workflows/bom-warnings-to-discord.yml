@@ -1,21 +1,21 @@
 name: BOM → Discord (QLD warnings)
 
 on:
+  push:
+    branches: [ main ]   # <- NEW: run whenever you push to main
   schedule:
-    # every 10 minutes
     - cron: "*/10 * * * *"
-  workflow_dispatch: {}  # <-- lets you run it right now from the Actions tab
+  workflow_dispatch: {}
 
 jobs:
   check-bom:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # we commit sent_warnings.json back to repo
+      contents: write
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 👀 show what files we actually have
       - name: Debug workspace
         run: |
           pwd
@@ -30,18 +30,16 @@ jobs:
         run: |
           pip install requests beautifulsoup4
 
-      # 🧪 run the script, but fail if secret missing
       - name: Run BOM → Discord script
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           if [ -z "$DISCORD_WEBHOOK_URL" ]; then
-            echo "❌ DISCORD_WEBHOOK_URL secret is NOT set in this repo."
+            echo "❌ DISCORD_WEBHOOK_URL secret is NOT set."
             exit 1
           fi
           python .github/scripts/bom_to_discord.py
 
-      # 📝 commit state so we don't repost same warnings every run
       - name: Commit state (sent_warnings.json) if changed
         run: |
           if [ -n "$(git status --porcelain)" ]; then
