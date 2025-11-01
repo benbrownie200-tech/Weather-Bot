@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # BOM QLD warnings RSS (real one)
-BOM_RSS_URL = "http://www.bom.gov.au/fwo/IDZ00056.warnings_qld.xml"
+BOM_RSS_URL = "http://reg.bom.gov.au/fwo/IDZ00056.warnings_qld.xml"
 STATE_FILE = "sent_warnings.json"
 
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL")
