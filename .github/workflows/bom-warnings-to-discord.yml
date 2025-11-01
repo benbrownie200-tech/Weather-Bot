@@ -2,7 +2,7 @@ name: BOM → Discord (QLD warnings)
 
 on:
   push:
-    branches: [ main ]   # <- NEW: run whenever you push to main
+    branches: [ main ]
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch: {}
@@ -28,17 +28,17 @@ jobs:
 
       - name: Install deps
         run: |
-          pip install requests beautifulsoup4
+          pip install requests
 
       - name: Run BOM → Discord script
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
-            echo "❌ DISCORD_WEBHOOK_URL secret is NOT set."
-            exit 1
-          fi
-          python .github/scripts/bom_to_discord.py
+            if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+              echo "❌ DISCORD_WEBHOOK_URL secret is NOT set."
+              exit 1
+            fi
+            python .github/scripts/bom_to_discord.py
 
       - name: Commit state (sent_warnings.json) if changed
         run: |
@@ -46,7 +46,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add sent_warnings.json
-            git commit -m "Update sent BOM warnings"
+            git commit -m "Update sent warnings"
             git push
           else
             echo "No changes to commit."
