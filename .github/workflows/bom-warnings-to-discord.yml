@@ -33,7 +33,7 @@ jobs:
       - name: Run BOM → Discord script
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          FORCE_SEND: "1"   # <--- add this for testing
+          # FORCE_SEND: "1"   # <--- add this for testing
         run: |
             if [ -z "$DISCORD_WEBHOOK_URL" ]; then
               echo "❌ DISCORD_WEBHOOK_URL secret is NOT set."
