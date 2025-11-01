@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 
 # CONFIG
-DISCORD_WEBHOOK_URL = os.getenv("https://discord.com/api/webhooks/1434035763250466919/gKZMn-nZ_V1rlhw8eW7FgJ9KBb3ytJDcpS5ZGXERwQJW4xxZYVJPjTve_X_R8AZ89BjM")
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1434035763250466919/gKZMn-nZ_V1rlhw8eW7FgJ9KBb3ytJDcpS5ZGXERwQJW4xxZYVJPjTve_X_R8AZ89BjM"
 BOM_WARNINGS_URL = "https://www.bom.gov.au/products/warn_qld.shtml"
 STATE_FILE = Path("sent_warnings.json")
 
