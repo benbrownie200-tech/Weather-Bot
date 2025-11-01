@@ -1,148 +1,132 @@
-import os
+#!/usr/bin/env python3
 import json
+import os
+import sys
+from datetime import datetime, timezone
+
 import requests
-import xml.etree.ElementTree as ET
-from pathlib import Path
+from bs4 import BeautifulSoup
 
-# ===== CONFIG =====
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-# QLD storm / flood / cyclone warnings (CAP-AU)
-QLD_CAP_URL = (
-    "https://publiccontent-gis-psba-qld-gov-au.s3.ap-southeast-2.amazonaws.com/"
-    "content/Feeds/StormFloodCycloneWarnings/StormWarnings_capau.xml"
-)
-STATE_FILE = Path("sent_warnings.json")
+# BOM QLD warnings RSS (real one)
+BOM_RSS_URL = "http://www.bom.gov.au/fwo/IDZ00056.warnings_qld.xml"
+STATE_FILE = "sent_warnings.json"
 
-# if set to "1", we will POST whatever we find (for testing)
-#FORCE_SEND = os.getenv("FORCE_SEND", "0") == "1"
+WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL")
 
 
-def load_sent_ids():
-    if not STATE_FILE.exists():
-        return set()
-    try:
-        return set(json.loads(STATE_FILE.read_text(encoding="utf-8")))
-    except Exception:
-        return set()
+def load_sent_ids(path: str) -> set:
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+                return set(data.get("sent_ids", []))
+            except json.JSONDecodeError:
+                return set()
+    return set()
 
 
-def save_sent_ids(ids):
-    STATE_FILE.write_text(json.dumps(list(ids), indent=2), encoding="utf-8")
+def save_sent_ids(path: str, ids: set) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"sent_ids": sorted(ids)}, f, indent=2)
 
 
-def fetch_cap_feed():
-    resp = requests.get(QLD_CAP_URL, timeout=20)
+def fetch_bom_items() -> list[dict]:
+    # BOM sometimes 403s scripts with a blank UA, so fake a browser UA
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (compatible; GitHubActions-BOM-to-Discord/1.0; "
+            "+https://github.com/benbrownie200-tech/Weather-Bot)"
+        )
+    }
+    resp = requests.get(BOM_RSS_URL, headers=headers, timeout=20)
+    # if this errors, we want the workflow to fail loudly
     resp.raise_for_status()
-    return resp.content
 
+    soup = BeautifulSoup(resp.text, "xml")
 
-def parse_cap_alerts(xml_bytes):
-    root = ET.fromstring(xml_bytes)
-    alerts = []
+    items = []
+    for item in soup.find_all("item"):
+        title = (item.title or "").text.strip()
+        description = (item.description or "").text.strip()
+        link = (item.link or "").text.strip()
+        guid_tag = item.find("guid")
+        guid = (guid_tag.text.strip() if guid_tag else "") or link or title
 
-    for alert in root.findall(".//{*}alert"):
-        identifier_el = alert.find("./{*}identifier")
-        headline_el = alert.find(".//{*}headline")
-        description_el = alert.find(".//{*}description")
-        web_el = alert.find(".//{*}web")
-
-        identifier = identifier_el.text.strip() if identifier_el is not None and identifier_el.text else None
-        headline = headline_el.text.strip() if headline_el is not None and headline_el.text else "Weather Warning"
-        description = description_el.text.strip() if description_el is not None and description_el.text else None
-        link = web_el.text.strip() if web_el is not None and web_el.text else QLD_CAP_URL
-
-        alerts.append(
+        pubdate = (item.pubDate or "").text.strip()
+        items.append(
             {
-                "id": identifier or headline,
-                "headline": headline,
+                "id": guid,
+                "title": title,
                 "description": description,
                 "link": link,
+                "pubDate": pubdate,
             }
         )
-
-    return alerts
-
-
-def send_to_discord(alert):
-    if not DISCORD_WEBHOOK_URL:
-        raise SystemExit("DISCORD_WEBHOOK_URL not set.")
-
-    desc = alert["description"] or "See source for details."
-
-    payload = {
-        "username": "QLD Warnings (BOM/QFES)",
-        "embeds": [
-            {
-                "title": f"⚠️ {alert['headline']}",
-                "description": desc[:3500],
-                "url": alert["link"],
-                "color": 0xFF6600,
-                "footer": {"text": "Source: QLD Storm/Flood/Cyclone CAP feed"},
-            }
-        ],
-    }
-
-    r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
-    r.raise_for_status()
+    return items
 
 
-def send_info_message(msg: str):
-    if not DISCORD_WEBHOOK_URL:
+def send_to_discord(text: str) -> None:
+    if not WEBHOOK:
+        print("[WARN] DISCORD_WEBHOOK_URL not set. Would have sent:")
+        print(text)
         return
-    payload = {
-        "username": "QLD Warnings (BOM/QFES)",
-        "content": msg,
-    }
-    requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
+
+    r = requests.post(WEBHOOK, json={"content": text}, timeout=20)
+    if r.status_code >= 400:
+        raise SystemExit(
+            f"Discord webhook failed: {r.status_code} {r.text[:200]}"
+        )
 
 
-def main():
-    xml_bytes = fetch_cap_feed()
-    alerts = parse_cap_alerts(xml_bytes)
-    sent_ids = load_sent_ids()
+def format_item(item: dict) -> str:
+    # produce a nice one-liner
+    title = item["title"] or "BOM warning"
+    link = item["link"]
+    if link:
+        return f"⚠️ **{title}**\n{link}"
+    else:
+        desc = item["description"] or ""
+        return f"⚠️ **{title}**\n{desc[:1800]}"  # discord 2k char limit
 
-    # if we want to force a Discord message (for testing)
-    if FORCE_SEND:
-        if alerts:
-            for alert in alerts:
-                send_to_discord(alert)
-            # still update state
-            new_ids = {a["id"] for a in alerts if a["id"]}
-            save_sent_ids(new_ids)
+
+def main() -> None:
+    try:
+        items = fetch_bom_items()
+    except Exception as e:
+        # tell discord we failed so you see it straight away
+        msg = f"❌ Couldn't fetch BOM QLD warnings from {BOM_RSS_URL}: {e}"
+        print(msg)
+        send_to_discord(msg)
+        raise
+
+    sent_ids = load_sent_ids(STATE_FILE)
+
+    if not items:
+        # RSS really is empty → announce once
+        if "NO_WARNINGS" not in sent_ids:
+            send_to_discord("ℹ️ No current QLD BOM warnings.")
+            sent_ids.add("NO_WARNINGS")
+            save_sent_ids(STATE_FILE, sent_ids)
         else:
-            send_info_message("ℹ️ No current QLD storm/flood/cyclone warnings in CAP feed.")
-        print("Force-sent current alerts.")
+            print("No warnings, already told Discord.")
         return
 
-    # normal mode below
+    # we have real warnings → clear the placeholder id
+    if "NO_WARNINGS" in sent_ids:
+        sent_ids.remove("NO_WARNINGS")
 
-    # first run: record what exists, don't spam
-    if not sent_ids and alerts:
-        new_ids = {a["id"] for a in alerts if a["id"]}
-        save_sent_ids(new_ids)
-        print("Initialised with current warnings (no Discord post).")
-        return
+    new_count = 0
+    for item in items:
+        warn_id = item["id"]
+        if warn_id in sent_ids:
+            continue
+        # new warning!
+        send_to_discord(format_item(item))
+        sent_ids.add(warn_id)
+        new_count += 1
 
-    if not alerts:
-        # send "no warnings" once per run
-        print("No alerts in feed.")
-        send_info_message("ℹ️ No current QLD storm/flood/cyclone warnings.")
-        return
-
-    new_alerts = [a for a in alerts if a["id"] not in sent_ids]
-
-    if not new_alerts:
-        print("No new warnings.")
-        return
-
-    for alert in new_alerts:
-        print("Sending:", alert["headline"])
-        send_to_discord(alert)
-        if alert["id"]:
-            sent_ids.add(alert["id"])
-
-    save_sent_ids(sent_ids)
-    print("Done.")
+    save_sent_ids(STATE_FILE, sent_ids)
+    print(f"Done. Found {len(items)} warning(s), posted {new_count} new one(s).")
 
 
 if __name__ == "__main__":
