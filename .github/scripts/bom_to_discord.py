@@ -1,27 +1,20 @@
 import os
 import json
 import requests
-from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# CONFIG
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1434035763250466919/gKZMn-nZ_V1rlhw8eW7FgJ9KBb3ytJDcpS5ZGXERwQJW4xxZYVJPjTve_X_R8AZ89BjM"
-BOM_WARNINGS_URL = "https://www.bom.gov.au/products/warn_qld.shtml"
+# ===== CONFIG =====
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+# QLD storm / flood / cyclone warnings (CAP-AU)
+QLD_CAP_URL = (
+    "https://publiccontent-gis-psba-qld-gov-au.s3.ap-southeast-2.amazonaws.com/"
+    "content/Feeds/StormFloodCycloneWarnings/StormWarnings_capau.xml"
+)
 STATE_FILE = Path("sent_warnings.json")
 
-KEYWORDS = [
-    "Warning",
-    "Severe",
-    "Thunderstorm",
-    "Cyclone",
-    "Flood",
-    "Heatwave",
-    "Tsunami",
-    "Fire Weather",
-]
 
-
-def load_sent():
+def load_sent_ids():
     if not STATE_FILE.exists():
         return set()
     try:
@@ -30,57 +23,87 @@ def load_sent():
         return set()
 
 
-def save_sent(sent_set):
-    STATE_FILE.write_text(json.dumps(list(sent_set), indent=2), encoding="utf-8")
+def save_sent_ids(ids):
+    STATE_FILE.write_text(json.dumps(list(ids), indent=2), encoding="utf-8")
 
 
-def fetch_bom_warnings():
-    """
-    Scrape current warnings from BOM QLD page.
-    If BOM tweaks HTML, you may need to adjust selectors.
-    """
-    resp = requests.get(BOM_WARNINGS_URL, timeout=20)
+def fetch_cap_feed():
+    # This S3 file should not 403 from GitHub
+    resp = requests.get(QLD_CAP_URL, timeout=20)
     resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    found = []
-
-    # Try to be generous because BOM’s layout can move around during site changes.
-    for tag in soup.find_all(["li", "p", "a", "div"]):
-        text = tag.get_text(" ", strip=True)
-        if not text:
-            continue
-        # Only keep likely warnings
-        if any(k in text for k in KEYWORDS):
-            # Avoid “Warnings current:” label itself
-            if "Warnings current" in text:
-                continue
-            found.append(text)
-
-    # Deduplicate but keep order
-    seen = set()
-    unique = []
-    for w in found:
-        if w not in seen:
-            seen.add(w)
-            unique.append(w)
-
-    return unique
+    return resp.content
 
 
-def send_discord(warning_text):
+def parse_cap_alerts(xml_bytes):
+    """
+    Parse CAP-AU XML and return a list of dicts:
+    [
+      {
+        "id": "...",            # unique identifier
+        "headline": "...",      # short text
+        "description": "...",   # long text (may be None)
+        "link": "...",          # optional
+      },
+      ...
+    ]
+    """
+    # CAP uses namespaces
+    ns = {
+        "cap": "urn:oasis:names:tc:emergency:cap:1.2",
+        # some feeds omit prefix; we'll handle that below
+    }
+
+    root = ET.fromstring(xml_bytes)
+
+    alerts = []
+
+    # Feed could be a single <alert> or multiple <alert> elements
+    # We'll just iterate over everything named 'alert'
+    for alert in root.findall(".//{*}alert"):
+        identifier_el = alert.find("./{*}identifier")
+        headline_el = alert.find(".//{*}headline")
+        description_el = alert.find(".//{*}description")
+        info_el = alert.find(".//{*}info")
+
+        identifier = identifier_el.text.strip() if identifier_el is not None and identifier_el.text else None
+        headline = headline_el.text.strip() if headline_el is not None and headline_el.text else "Weather Warning"
+        description = description_el.text.strip() if description_el is not None and description_el.text else None
+
+        # try to find a web link (in <web> or in <resource>)
+        web_el = alert.find(".//{*}web")
+        link = web_el.text.strip() if web_el is not None and web_el.text else None
+
+        # fallback: use the feed URL itself
+        if not link:
+            link = QLD_CAP_URL
+
+        alerts.append(
+            {
+                "id": identifier or headline,  # identifier is best for dedupe
+                "headline": headline,
+                "description": description,
+                "link": link,
+            }
+        )
+
+    return alerts
+
+
+def send_to_discord(alert):
     if not DISCORD_WEBHOOK_URL:
         raise SystemExit("DISCORD_WEBHOOK_URL not set.")
 
+    desc = alert["description"] or "See source for details."
+
     payload = {
-        "username": "BOM Warnings (QLD)",
+        "username": "QLD Warnings (BOM/QFES)",
         "embeds": [
             {
-                "title": "⚠️ New BOM Warning",
-                "description": warning_text,
-                "url": BOM_WARNINGS_URL,
+                "title": f"⚠️ {alert['headline']}",
+                "description": desc[:3500],  # stay well under Discord limit
+                "url": alert["link"],
                 "color": 0xFF6600,
-                "footer": {"text": "Source: Bureau of Meteorology – Queensland"},
+                "footer": {"text": "Source: QLD Storm/Flood/Cyclone CAP feed"},
             }
         ],
     }
@@ -90,27 +113,30 @@ def send_discord(warning_text):
 
 
 def main():
-    current_warnings = fetch_bom_warnings()
-    sent = load_sent()
+    xml_bytes = fetch_cap_feed()
+    alerts = parse_cap_alerts(xml_bytes)
+    sent_ids = load_sent_ids()
 
-    # First run: if we’ve never seen anything before, just record it
-    if not sent and current_warnings:
-        save_sent(set(current_warnings))
-        print("Initialised with current BOM warnings.")
+    # first ever run: just record what’s there to avoid spamming old warnings
+    if not sent_ids and alerts:
+        new_ids = {a["id"] for a in alerts if a["id"]}
+        save_sent_ids(new_ids)
+        print("Initialised with current warnings.")
         return
 
-    new_ones = [w for w in current_warnings if w not in sent]
+    new_alerts = [a for a in alerts if a["id"] not in sent_ids]
 
-    if not new_ones:
+    if not new_alerts:
         print("No new warnings.")
         return
 
-    for w in new_ones:
-        print("Sending warning:", w)
-        send_discord(w)
-        sent.add(w)
+    for alert in new_alerts:
+        print("Sending:", alert["headline"])
+        send_to_discord(alert)
+        if alert["id"]:
+            sent_ids.add(alert["id"])
 
-    save_sent(sent)
+    save_sent_ids(sent_ids)
     print("Done.")
 
 
