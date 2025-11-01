@@ -14,7 +14,7 @@ QLD_CAP_URL = (
 STATE_FILE = Path("sent_warnings.json")
 
 # if set to "1", we will POST whatever we find (for testing)
-FORCE_SEND = os.getenv("FORCE_SEND", "0") == "1"
+#FORCE_SEND = os.getenv("FORCE_SEND", "0") == "1"
 
 
 def load_sent_ids():
