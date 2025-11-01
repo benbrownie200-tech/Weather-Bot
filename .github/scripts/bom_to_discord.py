@@ -31,28 +31,46 @@ def save_sent_ids(path: str, ids: set) -> None:
 
 
 def fetch_bom_items() -> list[dict]:
-    # BOM sometimes 403s scripts with a blank UA, so fake a browser UA
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (compatible; GitHubActions-BOM-to-Discord/1.0; "
             "+https://github.com/benbrownie200-tech/Weather-Bot)"
         )
     }
-    resp = requests.get(BOM_RSS_URL, headers=headers, timeout=20)
-    # if this errors, we want the workflow to fail loudly
+    resp = requests.get("https://reg.bom.gov.au/fwo/IDZ00056.warnings_qld.xml", headers=headers, timeout=20)
     resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, "xml")
 
-    items = []
+    items: list[dict] = []
     for item in soup.find_all("item"):
-        title = (item.title or "").text.strip()
-        description = (item.description or "").text.strip()
-        link = (item.link or "").text.strip()
-        guid_tag = item.find("guid")
-        guid = (guid_tag.text.strip() if guid_tag else "") or link or title
+        # title
+        title_tag = item.find("title")
+        if title_tag is not None:
+            title = title_tag.get_text(strip=True)
+        else:
+            # sometimes BS gives you item.title == "some string"
+            t = getattr(item, "title", "")
+            title = t.strip() if isinstance(t, str) else "BOM warning"
 
-        pubdate = (item.pubDate or "").text.strip()
+        # description
+        desc_tag = item.find("description")
+        description = desc_tag.get_text(strip=True) if desc_tag else ""
+
+        # link
+        link_tag = item.find("link")
+        link = link_tag.get_text(strip=True) if link_tag else ""
+
+        # guid / id
+        guid_tag = item.find("guid")
+        guid = guid_tag.get_text(strip=True) if guid_tag else ""
+        if not guid:
+            guid = link or title
+
+        # pubDate (optional)
+        pubdate_tag = item.find("pubDate")
+        pubdate = pubdate_tag.get_text(strip=True) if pubdate_tag else ""
+
         items.append(
             {
                 "id": guid,
@@ -62,7 +80,9 @@ def fetch_bom_items() -> list[dict]:
                 "pubDate": pubdate,
             }
         )
+
     return items
+
 
 
 def send_to_discord(text: str) -> None:
