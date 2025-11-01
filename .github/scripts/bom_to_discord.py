@@ -103,10 +103,10 @@ def format_item(item: dict) -> str:
     title = item["title"] or "BOM warning"
     link = item["link"]
     if link:
-        return f"⚠️ **{title}**\n{link}"
+        return f"⚠️ @everyone **{title}**\n{link}"
     else:
         desc = item["description"] or ""
-        return f"⚠️ **{title}**\n{desc[:1800]}"  # discord 2k char limit
+        return f"⚠️ @everyone **{title}**{desc[:1800]}\n"  # discord 2k char limit
 
 
 def main() -> None:
@@ -124,7 +124,7 @@ def main() -> None:
     if not items:
         # RSS really is empty → announce once
         if "NO_WARNINGS" not in sent_ids:
-            send_to_discord("ℹ️ No current QLD BOM warnings.")
+            send_to_discord("ℹ️ No current QLD BOM warnings. \n This will only update when new warnings appear")
             sent_ids.add("NO_WARNINGS")
             save_sent_ids(STATE_FILE, sent_ids)
         else:
