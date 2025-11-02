@@ -81,9 +81,9 @@ def fetch_bom_items() -> list[dict]:
         description = desc_tag.get_text(strip=True) if desc_tag else ""
 
         # link
-        link_tag = item.find("link")
-        link = link_tag.get_text(strip=True) if link_tag else ""
-        #link = "https://www.bom.gov.au/weather-and-climate/warnings-and-alerts?stateName=Queensland"
+        #link_tag = item.find("link")
+        #link = link_tag.get_text(strip=True) if link_tag else ""
+        link = "https://www.bom.gov.au/weather-and-climate/warnings-and-alerts?stateName=Queensland"
 
         # guid / id
         guid_tag = item.find("guid")
