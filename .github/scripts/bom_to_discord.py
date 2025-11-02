@@ -131,22 +131,23 @@ def main() -> None:
             print("No warnings, already told Discord.")
         return
 
-    # we have real warnings → clear the placeholder id
-    if "NO_WARNINGS" in sent_ids:
-        sent_ids.remove("NO_WARNINGS")
+# we have items
+    current_ids = {i["id"] for i in items}
 
-    new_count = 0
+    # 🔴 this is the new part:
+    # if the CURRENT set of warnings is exactly what we posted last time → do nothing
+    if current_ids == sent_ids:
+        print("No change in warnings. Not posting.")
+        return
+
+    # otherwise, something changed (added / removed / updated) → post ALL current warnings
+    print("Change detected in warnings → posting full list.")
     for item in items:
-        warn_id = item["id"]
-        if warn_id in sent_ids:
-            continue
-        # new warning!
         send_to_discord(format_item(item))
-        sent_ids.add(warn_id)
-        new_count += 1
 
-    save_sent_ids(STATE_FILE, sent_ids)
-    print(f"Done. Found {len(items)} warning(s), posted {new_count} new one(s).")
+    # and now remember THIS exact set
+    save_sent_ids(STATE_FILE, current_ids)
+    print(f"Posted {len(items)} warning(s).")
 
 
 if __name__ == "__main__":
