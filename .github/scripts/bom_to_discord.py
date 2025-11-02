@@ -141,9 +141,23 @@ def main() -> None:
         return
 
     # otherwise, something changed (added / removed / updated) → post ALL current warnings
-    print("Change detected in warnings → posting full list.")
-    for item in items:
-        send_to_discord(format_item(item))
+print("Change detected in warnings → posting full list.")
+
+# Figure out which warnings are new
+new_ids = current_ids - sent_ids
+if new_ids:
+    send_to_discord(f"🚨 **New QLD BOM warnings detected ({len(new_ids)})!**")
+else:
+    send_to_discord("⚠️ **Warnings have changed or cleared — reposting current list.**")
+
+# Send all current warnings, highlighting new ones
+for item in items:
+    warn_id = item["id"]
+    msg = format_item(item)
+    if warn_id in new_ids:
+        msg = f"🆕 **NEW** {msg}"
+    send_to_discord(msg)
+
 
     # and now remember THIS exact set
     save_sent_ids(STATE_FILE, current_ids)
