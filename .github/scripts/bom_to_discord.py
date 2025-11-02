@@ -5,11 +5,27 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
-# You were using reg.bom.gov.au in the last run
+# current feed you’re using
 BOM_RSS_URL = "https://reg.bom.gov.au/fwo/IDZ00056.warnings_qld.xml"
 STATE_FILE = "sent_warnings.json"
 
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL")
+
+# Only care about GC + Brisbane
+GC_BNE_KEYWORDS = [
+    "southeast queensland",
+    "south east queensland",
+    "south-east queensland",
+    "southeast coast",
+    "southeast coast district",
+    "gold coast",
+    "city of gold coast",
+    "brisbane",
+    "brisbane city",
+    "scenic rim",
+    "queensland east coast",
+    "wide bay",
+]
 
 
 def send_to_discord(text: str) -> None:
@@ -64,8 +80,9 @@ def fetch_bom_items() -> list[dict]:
         description = desc_tag.get_text(strip=True) if desc_tag else ""
 
         # link
-        link_tag = item.find("link")
-        link = link_tag.get_text(strip=True) if link_tag else ""
+        #link_tag = item.find("link")
+        #link = link_tag.get_text(strip=True) if link_tag else ""
+        link = "https://www.bom.gov.au/weather-and-climate/warnings-and-alerts?stateName=Queensland"
 
         # guid / id
         guid_tag = item.find("guid")
@@ -84,6 +101,11 @@ def fetch_bom_items() -> list[dict]:
     return items
 
 
+def is_gold_coast_or_brisbane(item: dict) -> bool:
+    text = (item["title"] + " " + item["description"]).lower()
+    return any(k in text for k in GC_BNE_KEYWORDS)
+
+
 def format_item(item: dict) -> str:
     title = item["title"] or "BOM warning"
     link = item.get("link") or ""
@@ -95,44 +117,46 @@ def format_item(item: dict) -> str:
 
 def main() -> None:
     try:
-        items = fetch_bom_items()
+        all_items = fetch_bom_items()
     except Exception as e:
         msg = f"❌ Couldn't fetch BOM QLD warnings from {BOM_RSS_URL}: {e}"
         print(msg)
         send_to_discord(msg)
         raise
 
+    # 🔎 keep ONLY Gold Coast / Brisbane warnings
+    items = [it for it in all_items if is_gold_coast_or_brisbane(it)]
+
     sent_ids = load_sent_ids(STATE_FILE)
 
-    # if feed is actually empty
+    # if nothing for GC/BNE right now
     if not items:
         current_ids = set()
         if current_ids != sent_ids:
-            send_to_discord("ℹ️ Warnings cleared - No current warnings in QLD.")
+            send_to_discord("ℹ️ Warnings cleared – no current Gold Coast / Brisbane BOM warnings.")
             save_sent_ids(STATE_FILE, current_ids)
         else:
-            print("No warnings, no change.")
+            print("No GC/BNE warnings, no change.")
         return
 
-    # build the CURRENT set of IDs first
+    # build the CURRENT set of IDs from GC/BNE-only list
     current_ids = {i["id"] for i in items}
 
     # if nothing changed, bail
     if current_ids == sent_ids:
-        print("No change in warnings. Not posting.")
+        print("No change in GC/BNE warnings. Not posting.")
         return
 
-    # something changed → figure out which ones are NEW compared to last run
+    # something changed → figure out which are NEW
     new_ids = current_ids - sent_ids
-    print("Change detected in warnings → posting full list.")
+    print("Change detected in GC/BNE warnings → posting full GC/BNE list.")
 
     if new_ids:
-        send_to_discord(f"🚨 **New QLD BOM warnings detected ({len(new_ids)})!**")
+        send_to_discord(f"🚨 **New Gold Coast / Brisbane BOM warnings detected ({len(new_ids)})!**")
     else:
-        # e.g. one warning disappeared, or same IDs but wording changed
-        send_to_discord("⚠️ **Warnings updated — reposting current list.**")
+        send_to_discord("⚠️ **GC/BNE warnings updated — reposting current list.**")
 
-    # post ALL current warnings, but highlight the new ones
+    # post ALL current GC/BNE warnings, but highlight the new ones
     for item in items:
         wid = item["id"]
         msg = format_item(item)
@@ -140,9 +164,9 @@ def main() -> None:
             msg = f"🆕 **NEW** {msg}"
         send_to_discord(msg)
 
-    # finally, remember this exact set so we don't repost it next run
+    # remember this exact set so we don't repost it next run
     save_sent_ids(STATE_FILE, current_ids)
-    print(f"Posted {len(items)} warning(s).")
+    print(f"Posted {len(items)} GC/BNE warning(s).")
 
 
 if __name__ == "__main__":
