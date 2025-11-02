@@ -124,7 +124,7 @@ def main() -> None:
     if not items:
         # RSS really is empty → announce once
         if "NO_WARNINGS" not in sent_ids:
-            send_to_discord("ℹ️ No current QLD BOM warnings. \n This will only update when new warnings appear")
+            send_to_discord("ℹ️ There are no current weather warnings for Queensland \n New warnings will be messaged within 10 minutes of appearing on the BOM")
             sent_ids.add("NO_WARNINGS")
             save_sent_ids(STATE_FILE, sent_ids)
         else:
