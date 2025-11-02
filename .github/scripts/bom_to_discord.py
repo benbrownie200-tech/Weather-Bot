@@ -25,6 +25,7 @@ GC_BNE_KEYWORDS = [
     "scenic rim",
     "queensland east coast",
     "wide bay",
+    "marine wind"
 ]
 
 
