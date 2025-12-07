@@ -5,13 +5,11 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
-# current feed you’re using
 BOM_RSS_URL = "https://reg.bom.gov.au/fwo/IDZ00056.warnings_qld.xml"
 STATE_FILE = "sent_warnings.json"
 
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL")
 
-# Only care about GC + Brisbane
 GC_BNE_KEYWORDS = [
     "southeast queensland",
     "south east queensland",
@@ -24,8 +22,7 @@ GC_BNE_KEYWORDS = [
     "brisbane city",
     "scenic rim",
     "queensland east coast",
-    "wide bay",
-    "marine wind"
+    "wide bay"
 ]
 
 
@@ -68,7 +65,6 @@ def fetch_bom_items() -> list[dict]:
 
     items: list[dict] = []
     for item in soup.find_all("item"):
-        # title
         title_tag = item.find("title")
         if title_tag is not None:
             title = title_tag.get_text(strip=True)
@@ -76,16 +72,11 @@ def fetch_bom_items() -> list[dict]:
             t = getattr(item, "title", "")
             title = t.strip() if isinstance(t, str) else "BOM warning"
 
-        # description
         desc_tag = item.find("description")
         description = desc_tag.get_text(strip=True) if desc_tag else ""
 
-        # link
-        #link_tag = item.find("link")
-        #link = link_tag.get_text(strip=True) if link_tag else ""
         link = "https://www.bom.gov.au/weather-and-climate/warnings-and-alerts?stateName=Queensland"
 
-        # guid / id
         guid_tag = item.find("guid")
         guid = guid_tag.get_text(strip=True) if guid_tag else ""
         if not guid:
@@ -125,30 +116,38 @@ def main() -> None:
         send_to_discord(msg)
         raise
 
-    # 🔎 keep ONLY Gold Coast / Brisbane warnings
+    # filter GC/BNE only
     items = [it for it in all_items if is_gold_coast_or_brisbane(it)]
-
     sent_ids = load_sent_ids(STATE_FILE)
 
-    # if nothing for GC/BNE right now
+    # Global flag logic – if BOM has warnings but our region filter got nothing
+    if all_items and not items:
+        text = (
+            "⚠️ No GC/BNE warnings detected (but BOM shows other warnings). "
+            "This may be a BOM feed problem or missing region text – global flag triggered."
+        )
+        print(text)
+        send_to_discord(text)
+        return
+
+    # no GC/BNE warnings
     if not items:
         current_ids = set()
         if current_ids != sent_ids:
-            send_to_discord("ℹ️ Warnings cleared – no current Gold Coast / Brisbane BOM warnings.")
+            send_to_discord(
+                "ℹ️ Warnings cleared – no current Gold Coast / Brisbane BOM warnings."
+            )
             save_sent_ids(STATE_FILE, current_ids)
         else:
             print("No GC/BNE warnings, no change.")
         return
 
-    # build the CURRENT set of IDs from GC/BNE-only list
     current_ids = {i["id"] for i in items}
 
-    # if nothing changed, bail
     if current_ids == sent_ids:
         print("No change in GC/BNE warnings. Not posting.")
         return
 
-    # something changed → figure out which are NEW
     new_ids = current_ids - sent_ids
     print("Change detected in GC/BNE warnings → posting full GC/BNE list.")
 
@@ -157,7 +156,6 @@ def main() -> None:
     else:
         send_to_discord("⚠️ **GC/BNE warnings updated — reposting current list.**")
 
-    # post ALL current GC/BNE warnings, but highlight the new ones
     for item in items:
         wid = item["id"]
         msg = format_item(item)
@@ -165,7 +163,6 @@ def main() -> None:
             msg = f"🆕 **NEW** {msg}"
         send_to_discord(msg)
 
-    # remember this exact set so we don't repost it next run
     save_sent_ids(STATE_FILE, current_ids)
     print(f"Posted {len(items)} GC/BNE warning(s).")
 
